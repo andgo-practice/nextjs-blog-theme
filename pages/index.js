@@ -1,160 +1,79 @@
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { getPosts } from '../utils/mdx-utils';
-import Footer from '../components/Footer';
-import Header from '../components/Header';
-import Layout, { GradientBackground } from '../components/Layout';
-import ArrowIcon from '../components/ArrowIcon';
-import { getGlobalData } from '../utils/global-data';
-import SEO from '../components/SEO';
-import io from 'socket.io-client';
-import GIFEncoder from 'gif-encoder';
-import { createCanvas, Image } from 'canvas';
+import React, { useRef } from "react";
+import GIF from "gif.js";
 
-function Index({ posts, globalData }) {
-  const [socket, setSocket] = useState(null);
-  const [capturedImages, setCapturedImages] = useState([]);
+export default function Index() {
+  const videoRef = useRef(null);
+  const capturedImagesRef = useRef([]);
+  const gifPreviewRef = useRef(null);
 
-  useEffect(() => {
-    const socket = io();
-    setSocket(socket);
+  const startCapture = () => {
+    capturedImagesRef.current = []; // 이미지 배열 초기화
 
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
+    const captureInterval = setInterval(() => {
+      captureImage();
 
-  useEffect(() => {
-    if (socket) {
-      socket.on('imageCaptured', (imageFileName) => {
-        setCapturedImages((prevImages) => [...prevImages, imageFileName]);
-      });
-    }
-  }, [socket]);
+      if (capturedImagesRef.current.length >= 10) {
+        clearInterval(captureInterval);
+        createGif();
+      }
+    }, 1000); // 1초마다 이미지 캡처
+  };
 
-  function captureImage() {
-    if (socket) {
-      socket.emit('capture');
-    }
-  }
+  const captureImage = () => {
+    // 비디오 요소 가져오기
+    const video = videoRef.current;
 
-  function createGif() {
-    const gif = new GIFEncoder(400, 300);
-    gif.setRepeat(0);
-    gif.setDelay(100);
-    gif.start();
+    // Canvas 요소 생성 및 크기 설정
+    const canvas = document.createElement("canvas");
+    canvas.width = 100;
+    canvas.height = 100;
 
-    capturedImages.forEach((imageFileName) => {
-      const image = new Image();
-      image.src = imageFileName;
-      image.onload = () => {
-        const canvas = createCanvas(400, 300);
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(image, 0, 0, 400, 300);
-        gif.addFrame(ctx);
-      };
+    // Canvas에 현재 비디오 화면 그리기
+    const context = canvas.getContext("2d");
+    context.drawImage(video, 0, 0, 100, 100);
+
+    // 이미지를 Blob 형식으로 변환
+    canvas.toBlob((blob) => {
+      // 이미지를 배열에 추가
+      capturedImagesRef.current.push(blob);
+    }, "image/jpeg", 0.8);
+  };
+
+  const createGif = () => {
+    const gif = new GIF({
+      workers: 2,
+      quality: 10,
+      width: 400,
+      height: 300,
     });
 
-    gif.finish();
+    capturedImagesRef.current.forEach((image) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        gif.addFrame(reader.result, { delay: 300 });
+      };
+      reader.readAsDataURL(image);
+    });
 
-    const gifBlob = new Blob([gif.out.getData()], { type: 'image/gif' });
-    const gifURL = URL.createObjectURL(gifBlob);
+    gif.on("finished", (blob) => {
+      gifPreviewRef.current.src = URL.createObjectURL(blob);
+      gifPreviewRef.current.style.display = "block";
+    });
 
-    const gifPreview = document.getElementById('gifPreview');
-    gifPreview.src = gifURL;
-    gifPreview.style.display = 'block';
-  }
+    gif.render();
+  };
 
   return (
-    <Layout>
-      <SEO title={globalData.name} description={globalData.blogTitle} />
-      <Header name={globalData.name} />
-      <main className="w-full">
-        <h1 className="text-3xl lg:text-5xl text-center mb-12">
-          {globalData.blogTitle}
-        </h1>
-        <ul className="w-full">
-          {posts.map((post) => (
-            <li
-              key={post.filePath}
-              className="md:first:rounded-t-lg md:last:rounded-b-lg backdrop-blur-lg bg-white dark:bg-black dark:bg-opacity-30 bg-opacity-10 hover:bg-opacity-20 dark:hover:bg-opacity-50 transition border border-gray-800 dark:border-white border-opacity-10 dark:border-opacity-10 border-b-0 last:border-b hover:border-b hovered-sibling:border-t-0"
-            >
-              <Link
-                as={`/posts/${post.filePath.replace(/\.mdx?$/, '')}`}
-                href={`/posts/[slug]`}
-              >
-                <a className="py-6 lg:py-10 px-6 lg:px-16 block focus:outline-none focus:ring-4">
-                  {post.data.date && (
-                    <p className="uppercase mb-3 font-bold opacity-60">
-                      {post.data.date}
-                    </p>
-                  )}
-                  <h2 className="text-2xl md:text-3xl">{post.data.title}</h2>
-                  {post.data.description && (
-                    <p className="mt-3 text-lg opacity-60">
-                      {post.data.description}
-                    </p>
-                  )}
-                  <ArrowIcon className="mt-4" />
-                </a>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </main>
-      <Footer copyrightText={globalData.footerText} />
-      <GradientBackground
-        variant="large"
-        className="fixed top-20 opacity-40 dark:opacity-60"
-      />
-      <GradientBackground
-        variant="small"
-        className="absolute bottom-0 opacity-20 dark:opacity-10"
-      />
-      <div className="flex justify-center mt-8">
-        <button
-          onClick={captureImage}
-          className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-        >
-          시작
-        </button>
-      </div>
-      <div className="flex flex-wrap justify-center mt-8">
-        {capturedImages.map((imageFileName, index) => (
-          <div key={index} className="mr-4 mb-4">
-            <img src={imageFileName} alt={`Image ${index}`} className="w-32 h-32" />
-          </div>
+    <div>
+      <h1>카메라 영상 미리보기, 이미지 캡처 및 GIF 생성</h1>
+      <video ref={videoRef} width="400" height="300" autoPlay></video>
+      <button onClick={startCapture}>시작</button>
+      <div>
+        {capturedImagesRef.current.map((image, index) => (
+          <img key={index} src={URL.createObjectURL(image)} alt={`Image ${index}`} width="100" height="100" />
         ))}
       </div>
-      <div className="flex justify-center mt-8">
-        {capturedImages.length >= 10 && (
-          <button
-            onClick={createGif}
-            className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
-          >
-            GIF 생성
-          </button>
-        )}
-      </div>
-      <div className="flex justify-center mt-8">
-        {capturedImages.length >= 10 && (
-          <img
-            id="gifPreview"
-            src=""
-            alt="Generated GIF"
-            style={{ display: 'none' }}
-          />
-        )}
-      </div>
-    </Layout>
+      <img ref={gifPreviewRef} style={{ display: "none" }} alt="GIF Preview" />
+    </div>
   );
 }
-
-export function getStaticProps() {
-  const posts = getPosts();
-  const globalData = getGlobalData();
-
-  return { props: { posts, globalData } };
-}
-
-export default Index;
